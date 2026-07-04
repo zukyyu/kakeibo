@@ -6,7 +6,7 @@
 <title>底値帳｜スマート家計簿</title>
 <meta name="theme-color" content="#1E6B47">
 <link rel="manifest" href="./manifest.json">
-<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <style>
@@ -337,7 +337,7 @@ function lowestOf(pid, sinceStr){
 const NAV = [
   { v:'home',   label:'ホーム',    ico:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>' },
   { v:'cal',    label:'カレンダー', ico:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>' },
-  { v:'search', label:'底値検索',  ico:'<circle cx="11" cy="11" r="6.5"/><path d="m16 16 5 5"/>' },
+  { v:'search', label:'最安値検索',  ico:'<circle cx="11" cy="11" r="6.5"/><path d="m16 16 5 5"/>' },
   { v:'settings',label:'設定',     ico:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>' }
 ];
 function renderNav(){
@@ -451,10 +451,10 @@ function openDay(ds){
 }
 function closeDay(){ $('#sheet').classList.remove('open'); $('#scrim').classList.remove('show'); }
 
-/* ---------- 底値検索 ---------- */
+/* ---------- 最安値検索 ---------- */
 function searchHtml(){
   return `
-  <div class="topbar"><h1>底値検索</h1></div>
+  <div class="topbar"><h1>最安値検索</h1></div>
   <div class="section">
     <input class="search-in" data-bind="q" value="${esc(state.q)}" placeholder="商品名で検索（例：牛乳）" autocomplete="off">
     <div id="results">${state.selProd ? prodDetailHtml() : resultsHtml()}</div>
