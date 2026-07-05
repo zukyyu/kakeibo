@@ -2,7 +2,7 @@
    アプリ本体（シェル）をキャッシュしてオフラインでも起動できるようにする。
    GASへのAPI通信（別オリジン・POST）には一切介入しない。
    ★ index.html 等を更新したら CACHE_VERSION を上げること（例: v1 → v2） */
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = 'sokone-' + CACHE_VERSION;
 const ASSETS = [
   './',
