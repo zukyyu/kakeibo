@@ -162,10 +162,6 @@ input,select{font:inherit;color:inherit;font-size:16px}
 .lcard .nums .lab{font-size:10px;color:var(--muted);font-weight:700;display:block;margin-bottom:2px}
 .lcard .ltotal{font-family:var(--mono);font-weight:800;white-space:nowrap;padding-top:13px}
 .lcard .del{color:var(--muted);font-size:17px;padding:8px 4px 0 4px}
-.chk{width:26px;height:26px;border-radius:50%;border:2px solid var(--line);background:transparent;color:#fff;flex:none;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;margin-right:10px;cursor:pointer}
-.chk.on{background:var(--green);border-color:var(--green)}
-.addbtn{width:30px;height:30px;border-radius:50%;border:1px solid var(--green);background:transparent;color:var(--green);font-size:18px;font-weight:600;flex:none;margin-left:10px;cursor:pointer;line-height:1}
-.row .del{color:var(--muted);font-size:16px;padding:4px;background:transparent;border:none;cursor:pointer}
 .sug{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px}
 .hint{font-size:12px;color:var(--muted)}
 .legend{display:flex;gap:12px;font-size:11px;color:var(--muted);margin:2px 0 12px}
@@ -372,13 +368,13 @@ const state = {
   cfg: { gasUrl:'', token:'' },
   demo: false,
   lastSync: null,
-  data: { items:[], products:[], stores:[], aliases:[], genres:[], shopping:[] },
+  data: { items:[], products:[], stores:[], aliases:[], genres:[] },
   view: 'home',
   calY: cycleOf(new Date()).y, calM: cycleOf(new Date()).m,   // 現在の月度で初期化
   selDay: null,
   q: '', selProd: null, sort: 'price',
   pending: null,  // 確認画面の編集中データ
-  genreEdit: null, genreInput: '', genreQ: '', amtEdit: null, shopInput: ''
+  genreEdit: null, genreInput: '', genreQ: '', amtEdit: null, memoText: '', memoResults: null
 };
 
 /* ---------- API層 ----------
@@ -941,142 +937,88 @@ async function deleteItem(id){
 }
 
 /* ---------- 最安値検索 ---------- */
-/* ---------- 買い物リスト（最安値特化の主役機能）----------
-   買う前に「底値・底値店」を見て店を決め、買い忘れ・ついで買いを防ぐ。 */
-function shoppingList(){ return state.data.shopping || (state.data.shopping = []); }
+/* ---------- 買い物メモ（安い順に並べて表示） ----------
+   複数行まとめて入力→ボタンで一括検索。入力中は再描画しない
+   （前の「買い物リスト」で1文字ごとの再描画がフォーカスを奪い入力できなかった反省）。 */
 
-/* 商品/ジャンルの底値（全期間・単価も加味）を1行で返す */
-function bestForList(entry){
-  /* entry.productId があればその商品、無ければ genre で横断、それも無ければ名前一致を試す */
-  if(entry.productId){
-    const low = lowestOf(entry.productId, null);
-    const p = prodById(entry.productId);
-    if(low){ const up = unitPriceOf(low, p); return { price:low.price, store:(storeById(low.storeId)||{}).name||'', up }; }
-  }
-  const g = entry.genre || (entry.productId ? effGenre(prodById(entry.productId)) : '');
-  if(g){
-    const low = lowestOfGenre(g, null);
-    if(low){ const p=prodById(low.productId); const up=unitPriceOf(low,p);
-      return { price:low.price, store:(storeById(low.storeId)||{}).name||'', up, viaGenre:true, product:(p||{}).name }; }
-  }
-  /* 名前でゆるく一致（自由入力の品）*/
-  const nz = norm(entry.name);
-  const hit = state.data.products.find(p => norm(p.name).includes(nz) || nz.includes(norm(p.name)));
-  if(hit){ const low=lowestOf(hit.id,null); if(low){ const up=unitPriceOf(low,hit);
-    return { price:low.price, store:(storeById(low.storeId)||{}).name||'', up, viaName:true, product:hit.name }; } }
-  return null;
-}
-
-async function saveShopping(){
-  try{ await api('saveShopping', { items: shoppingList() }); saveCache(); }
-  catch(e){ toast('リスト保存に失敗: ' + e.message); }
-}
-function shopAddProduct(pid){
-  const p = prodById(pid); if(!p) return;
-  if(shoppingList().some(e => e.productId === pid)){ toast('もうリストにあります'); return; }
-  shoppingList().push({ id: uid('L'), name: p.name, productId: pid, genre: effGenre(p)||'', done:false, note:'' });
-  saveShopping(); render(); toast(`「${p.name}」をリストに追加`);
-}
-/* 自由入力のサジェスト: 入力語からジャンル候補と既存商品を提案。
-   タップで確定するとジャンル/商品に確実に紐付き、ついで買い検出が効く。 */
-function shopSuggest(q){
-  const nz = norm(q);
-  if(!nz) return [];
-  const out = [];
-  /* ジャンル候補（前方一致→部分一致） */
-  allGenres().forEach(g => {
-    const ng = norm(g);
-    if(ng.includes(nz) || nz.includes(ng)) out.push({ type:'genre', label:g, genre:g });
-  });
-  /* 商品候補 */
-  state.data.products.forEach(p => {
-    if(norm(p.name).includes(nz)) out.push({ type:'product', label:p.name, productId:p.id, genre:effGenre(p)||'' });
-  });
-  /* ジャンル優先・重複排除・最大6件 */
-  const seen = {}; const uniq = [];
-  out.sort((a,b) => (a.type==='genre'?0:1)-(b.type==='genre'?0:1));
-  for(const s of out){ const k = s.type+':'+s.label; if(!seen[k]){ seen[k]=1; uniq.push(s); } if(uniq.length>=6) break; }
-  return uniq;
-}
-function shopAddFrom(sug){
-  shoppingList().push({ id: uid('L'), name: sug.label,
-    productId: sug.productId || '', genre: sug.genre || '', done:false, note:'' });
-  state.shopInput = ''; saveShopping(); render();
-  toast(`「${sug.label}」をリストに追加`);
-}
-
-function renderShopSug(){
-  /* 入力中はリストカードだけ差し替え（inputのフォーカス維持のため全体renderしない）*/
-  const box = document.querySelector('#shop-box');
-  if(box) box.innerHTML = shoppingHtml();
-}
-function shopAddFree(){
-  const name = (state.shopInput||'').trim();
-  if(!name){ return; }
-  /* 既存商品/ジャンルに名前で当てられれば紐付ける（底値が出るように）*/
+/* 1品名から底値を探す: 商品名の直接一致→ジャンル一致→部分一致の順 */
+function memoLookup(name){
   const nz = norm(name);
-  const hitP = state.data.products.find(p => norm(p.name) === nz);
-  const hitG = allGenres().find(g => norm(g) === nz);
-  shoppingList().push({ id: uid('L'), name: name,
-    productId: hitP ? hitP.id : '', genre: hitP ? (effGenre(hitP)||'') : (hitG||''), done:false, note:'' });
-  state.shopInput = ''; saveShopping(); render();
-}
-function shopToggle(id){ const e = shoppingList().find(x=>x.id===id); if(e){ e.done=!e.done; saveShopping(); render(); } }
-function shopRemove(id){ state.data.shopping = shoppingList().filter(x=>x.id!==id); saveShopping(); render(); }
-function shopClearDone(){ state.data.shopping = shoppingList().filter(x=>!x.done); saveShopping(); render(); }
-
-function shoppingHtml(){
-  const list = shoppingList();
-  const head = `<div class="bhead"><span class="eyebrow">🛒 買い物リスト${list.length?`（${list.filter(e=>!e.done).length}）`:''}</span>
-    ${list.some(e=>e.done)?'<button class="lnk" data-action="shop-clear">完了を消す</button>':''}</div>`;
-  const sugs = shopSuggest(state.shopInput||'');
-  const sugHtml = (state.shopInput && sugs.length) ? `<div class="chips" style="gap:6px;margin:-2px 0 8px">${
-    sugs.map((s,i) => `<button class="chip" data-action="shop-sug" data-i="${i}">${s.type==='genre'?'🏷️':''}${esc(s.label)}</button>`).join('')
-  }</div>` : '';
-  const input = `<div style="display:flex;gap:6px;margin:8px 0">
-    <input class="search-in" data-bind="shop-input" value="${esc(state.shopInput||'')}" placeholder="品名を入力（ジャンルで登録すると検出が正確）" autocomplete="off" style="flex:1">
-    <button class="btn btn-ghost" data-action="shop-add" style="width:auto;padding:0 16px">追加</button></div>${sugHtml}`;
-  if(!list.length){
-    return `<div class="card" style="margin-bottom:12px">${head}${input}
-      <div class="hint">最安値検索の商品の「＋リスト」からも追加できます。底値と底値店が並びます。</div></div>`;
+  if(!nz) return null;
+  /* 商品名の完全一致優先 */
+  let hit = state.data.products.find(p => norm(p.name) === nz);
+  /* ジャンル名の完全一致 */
+  if(!hit){
+    const g = allGenres().find(g => norm(g) === nz);
+    if(g){
+      const low = lowestOfGenre(g, null);
+      if(low){ const p = prodById(low.productId); const up = unitPriceOf(low, p);
+        return { input:name, price:low.price, store:(storeById(low.storeId)||{}).name||'', up, product:(p||{}).name, genre:g }; }
+      return { input:name, price:null, genre:g };
+    }
   }
-  const rows = list.slice().sort((a,b)=>(a.done?1:0)-(b.done?1:0)).map(e => {
-    const b = bestForList(e);
-    const sub = b ? `底値 <b class="price">${yen(b.price)}</b>${b.up?` (${fmtUnitPrice(b.up)})`:''} @${esc(b.store)}${b.viaGenre&&b.product?`（${esc(b.product)}）`:''}` : '底値データなし';
-    return `<div class="row" style="opacity:${e.done?0.45:1}">
-      <button class="chk ${e.done?'on':''}" data-action="shop-tog" data-id="${e.id}" aria-label="チェック">${e.done?'✓':''}</button>
-      <div class="grow"><div class="t1" style="${e.done?'text-decoration:line-through':''}">${esc(e.name)}</div>
-        <div class="t2">${sub}</div></div>
-      <button class="del" data-action="shop-del" data-id="${e.id}" aria-label="削除">🗑️</button></div>`;
-  }).join('');
-  return `<div class="card" style="margin-bottom:12px">${head}${input}${rows}
-    <button class="btn btn-ghost" style="margin-top:10px" data-action="shop-remind">🔔 リマインダーに書き出す</button></div>`;
+  /* 商品名・ジャンル名の部分一致（どちらかがどちらかを含む） */
+  if(!hit){
+    hit = state.data.products.find(p => norm(p.name).includes(nz) || nz.includes(norm(p.name)));
+  }
+  if(!hit){
+    const g = allGenres().find(g => norm(g).includes(nz) || nz.includes(norm(g)));
+    if(g){
+      const low = lowestOfGenre(g, null);
+      if(low){ const p = prodById(low.productId); const up = unitPriceOf(low, p);
+        return { input:name, price:low.price, store:(storeById(low.storeId)||{}).name||'', up, product:(p||{}).name, genre:g }; }
+      return { input:name, price:null, genre:g };
+    }
+  }
+  if(hit){
+    const low = lowestOf(hit.id, null);
+    if(low){ const up = unitPriceOf(low, hit);
+      return { input:name, price:low.price, store:(storeById(low.storeId)||{}).name||'', up, product:hit.name, genre:effGenre(hit)||'' }; }
+    return { input:name, price:null, product:hit.name };
+  }
+  return { input:name, price:null };
 }
-
-/* iOSリマインダーへ書き出し（底値はメモに残す）。Reminders用URLスキームで1件ずつ、
-   まとめてはクリップボード＋共有にフォールバック */
-function exportToReminders(){
-  const items = shoppingList().filter(e=>!e.done);
-  if(!items.length){ toast('未完了のアイテムがありません'); return; }
-  const lines = items.map(e => {
-    const b = bestForList(e);
-    return b ? `${e.name}（底値${yen(b.price)}@${b.store}）` : e.name;
+function runMemoSearch(){
+  const lines = (state.memoText||'').split('\n').map(s => s.trim()).filter(Boolean);
+  state.memoResults = lines.map(memoLookup);
+  render();
+}
+function memoResultsHtml(){
+  const rs = state.memoResults;
+  if(!rs) return '';
+  const found = rs.filter(r => r.price != null).sort((a,b) => a.price - b.price);
+  const notFound = rs.filter(r => r.price == null);
+  if(!found.length && !notFound.length) return '';
+  let html = `<div class="card" style="margin-top:10px">`;
+  found.forEach(r => {
+    html += `<div class="row">
+      <div class="grow"><div class="t1">${esc(r.input)}${r.product && r.product!==r.input ? `<span class="t2" style="display:block">${esc(r.product)}</span>`:''}</div></div>
+      <div style="text-align:right"><div class="price">${yen(r.price)}</div>
+        <div class="t2">${r.up ? fmtUnitPrice(r.up)+'・' : ''}${esc(r.store||'')}</div></div>
+    </div>`;
   });
-  /* まず標準の共有シート。使えなければクリップボードにコピー */
-  const text = '買い物リスト\n' + lines.join('\n');
-  if(navigator.share){
-    navigator.share({ title:'買い物リスト', text }).catch(()=>{});
-  } else {
-    navigator.clipboard.writeText(text).then(()=>toast('リストをコピーしました。リマインダーに貼り付けてください'))
-      .catch(()=>{ state.promptText = text; render(); });
+  if(notFound.length){
+    html += `<div class="row" style="opacity:.6"><div class="grow"><div class="t1">${notFound.map(r=>esc(r.input)).join('・')}</div>
+      <div class="t2">登録なし（データがまだありません）</div></div></div>`;
   }
+  html += `</div>`;
+  return html;
+}
+function memoHtml(){
+  return `<div class="card" style="margin-bottom:12px">
+    <div class="eyebrow" style="margin-bottom:6px">🛒 買い物メモ</div>
+    <p class="hint" style="margin-bottom:8px">買うものを1行に1つ入力すると、登録データから安い順に並べて表示します。</p>
+    <textarea class="in" data-bind="memo-text" rows="4" placeholder="牛乳&#10;キウイ&#10;トイレットペーパー" style="font-family:inherit;font-size:16px">${esc(state.memoText||'')}</textarea>
+    <button class="btn btn-primary" style="margin-top:8px" data-action="memo-search">安い順に調べる</button>
+    ${memoResultsHtml()}
+  </div>`;
 }
 
 function searchHtml(){
   return `
   <div class="topbar"><h1>最安値検索</h1></div>
   <div class="section">
-    ${state.selProd ? '' : `<div id="shop-box">${shoppingHtml()}</div>`}
+    ${state.selProd ? '' : memoHtml()}
     <input class="search-in" data-bind="q" value="${esc(state.q)}" placeholder="商品名で検索（例：牛乳）" autocomplete="off">
     <div id="results">${state.selProd ? prodDetailHtml() : resultsHtml()}</div>
   </div>`;
@@ -1154,7 +1096,6 @@ function resultsHtml(){
           <div class="t2">${up ? fmtUnitPrice(up) + '・' : ''}${esc(p.category||'')}</div></div>
         ${low ? `<div style="text-align:right"><div class="price ${hi?'red':''}">${yen(low.price)}</div>
           <div class="t2">${esc(storeById(low.storeId)?.name||'')}</div></div>` : '<div class="t2">履歴なし</div>'}
-        <button class="addbtn" data-action="shop-addp" data-id="${p.id}" aria-label="リストに追加">＋</button>
       </div>`;
     });
     html += `</div>`;
@@ -1170,7 +1111,6 @@ function resultsHtml(){
           <div class="t2">${g?'🏷️'+esc(g)+'・':''}${esc(p.category||'')}</div></div>
         ${low ? `<div style="text-align:right"><div class="price">${yen(low.price)}</div>
           <div class="t2">${esc(storeById(low.storeId)?.name||'')}</div></div>` : '<div class="t2">履歴なし</div>'}
-        <button class="addbtn" data-action="shop-addp" data-id="${p.id}" aria-label="リストに追加">＋</button>
       </div>`;
     }).join('') + `</div>`;
   }
@@ -1794,7 +1734,7 @@ function genDemo(){
       });
     });
   }
-  return { items, products, stores, aliases, genres:[], shopping:[] };
+  return { items, products, stores, aliases, genres:[] };
 }
 
 function demoApi(action, payload){
@@ -1906,34 +1846,6 @@ function receiptToPending(r){
 function allProductsIn(pending){ return state.data.products.concat(pending.newProducts); }
 
 /* JSON一括取り込みの実行 */
-/* インポートした明細を買い物リストと突き合わせる。
-   ・リストにある品（商品ID一致 or ジャンル一致 or 名前ゆらぎ一致）は done=true に
-   ・リストに無い品は「ついで買い」として集計し通知（あなたの弱点＝予定外購入の可視化）*/
-function detectImpulse(items){
-  const list = shoppingList();
-  const onList = e => e;
-  let matched = 0;
-  const impulse = [];
-  items.forEach(it => {
-    const p = prodById(it.productId);
-    const g = p ? effGenre(p) : '';
-    const nz = norm((p && p.name) || it.raw || '');
-    const hit = list.find(e =>
-      (e.productId && e.productId === it.productId) ||
-      (e.genre && g && e.genre === g) ||
-      (nz && (norm(e.name) === nz || norm(e.name).includes(nz) || nz.includes(norm(e.name)))));
-    if(hit){ if(!hit.done){ hit.done = true; matched++; } }
-    else { impulse.push((p && p.name) || it.raw); }
-  });
-  if(list.length){
-    if(matched) saveShopping();
-    if(impulse.length){
-      const uniq = Array.from(new Set(impulse)).slice(0, 5);
-      toast(`リスト外の買い物 ${impulse.length}件: ${uniq.join('、')}${impulse.length>uniq.length?' ほか':''}`);
-    }
-  }
-}
-
 async function runImport(text){
   let receipts;
   try{ receipts = parseImportJson(text); }
@@ -1991,7 +1903,6 @@ async function runImport(text){
       newAliases: allAliases, newGenres: allGenres });
     state.data.items = state.data.items.concat(allItems);
     state.data.genres = (state.data.genres || []).concat(allGenres);
-    detectImpulse(allItems);   /* 買い物リストと照合（ついで買い検出＋自動チェック）*/
     saveCache();
     state.importText = '';
     state.view = 'home'; render();
@@ -2011,7 +1922,7 @@ async function resetAll(){
   try{
     busy('リセット中…');
     await api('reset', { confirm:'RESET' });
-    state.data = { items:[], products:[], stores:[], aliases:[], genres:[], shopping:[] };
+    state.data = { items:[], products:[], stores:[], aliases:[], genres:[] };
     store.del('kakeibo_cache');
     state.q = ''; state.genreEdit = null;
     render();
@@ -2025,7 +1936,7 @@ async function sync(showResult){
   try{
     busy('スプレッドシートと同期中…');
     const d = await api('getAll');
-    state.data = { items:d.items||[], products:d.products||[], stores:d.stores||[], aliases:d.aliases||[], genres:d.genres||[], shopping:d.shopping||[] };
+    state.data = { items:d.items||[], products:d.products||[], stores:d.stores||[], aliases:d.aliases||[], genres:d.genres||[] };
     state.demo = false; state.lastSync = Date.now();
     saveCache(); render();
     if(showResult) toast('同期しました');
@@ -2077,13 +1988,7 @@ document.addEventListener('click', e => {
     case 'item-del': deleteItem(t.dataset.id); break;
     case 'sheet-close': closeDay(); break;
     case 'prod': state.selProd = t.dataset.id; render(); break;
-    case 'shop-addp': shopAddProduct(t.dataset.id); break;
-    case 'shop-add': shopAddFree(); break;
-    case 'shop-sug': { const sugs = shopSuggest(state.shopInput||''); const s = sugs[+t.dataset.i]; if(s) shopAddFrom(s); break; }
-    case 'shop-tog': shopToggle(t.dataset.id); break;
-    case 'shop-del': shopRemove(t.dataset.id); break;
-    case 'shop-clear': shopClearDone(); break;
-    case 'shop-remind': exportToReminders(); break;
+    case 'memo-search': runMemoSearch(); break;
     case 'search-back': state.selProd = null; render(); break;
     case 'sort': state.sort = t.dataset.s; render(); break;
     case 'cf-close': state.pending = null; renderConfirm(); toast('入力を破棄しました'); break;
@@ -2136,7 +2041,7 @@ document.addEventListener('input', e => {
     const el = $('#genre-list'); if(el) el.innerHTML = genreListHtml();
   }
   else if(b === 'genre-input'){ state.genreInput = v; }
-  else if(b === 'shop-input'){ state.shopInput = v; renderShopSug(); }
+  else if(b === 'memo-text'){ state.memoText = v; }
   else if(b === 'cf-newstore'){ p.newStoreName = v; }
   else if(b === 'cf-find'){
     const i = +e.target.dataset.i;
