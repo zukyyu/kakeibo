@@ -1293,10 +1293,6 @@ function settingsHtml(){
       <div class="mono">明細${d.items.length}・商品${d.products.length}・店${d.stores.length}・辞書${d.aliases.length}</div></div>
     <div class="row"><div class="grow t1">最終同期</div>
       <div class="mono">${state.lastSync?new Date(state.lastSync).toLocaleString('ja-JP'):'—'}</div></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
-      <button class="btn btn-ghost" data-action="cfg-sync">今すぐ同期</button>
-      <button class="btn btn-ghost" data-action="cfg-demo">デモデータ再読込</button>
-    </div>
   </div>
   <div class="section card">
     <div class="eyebrow" style="margin-bottom:6px">レシートJSONインポート</div>
@@ -1304,19 +1300,6 @@ function settingsHtml(){
     <textarea class="in" id="imp-text" data-bind="imp-text" rows="6" placeholder='[{"date":"2026-07-01","store":"…","taxMode":"excl","subtotal":999,"total":1098,"items":[…]}]' style="font-family:var(--mono);font-size:16px">${esc(state.importText||'')}</textarea>
     <button class="btn btn-primary" style="margin-top:12px" data-action="imp-run">JSONを取り込む</button>
     <p class="hint" style="margin-top:8px">取り込み前に確認ダイアログが出ます。おかしなデータは後からカレンダーの明細削除で消せます。</p>
-  </div>
-  <div class="section card">
-    <div class="eyebrow" style="margin-bottom:6px">OCRデバッグ</div>
-    <details>
-      <summary class="hint" style="cursor:pointer">最後に読み取ったレシートの原文を表示</summary>
-      <textarea class="in" readonly rows="10" style="margin-top:8px;font-family:var(--mono);font-size:16px">${esc(store.get('kakeibo_last_ocr') || '（まだOCRを実行していません）')}</textarea>
-    </details>
-    <p class="hint" style="margin-top:8px">読み取り結果がおかしい時は、この全文をコピーして相談すると、原因を正確に特定できます。</p>
-  </div>
-  <div class="section card" style="border:1px solid var(--err)">
-    <div class="eyebrow" style="margin-bottom:6px;color:var(--err)">デバッグ：スプレッドシートを初期化</div>
-    <p class="hint" style="margin-bottom:10px">スプレッドシートの全データ（購入明細・商品・店舗・辞書・ジャンル）を削除し、まっさらな状態に戻します。この端末のキャッシュも消えます。<b>元に戻せません。</b>テスト用です。</p>
-    <button class="btn" style="background:var(--err);color:#fff" data-action="cfg-reset">全データをリセット</button>
   </div>
   <p class="hint" style="margin:14px 4px">最安値帳 v0.1 — GAS側APIの仕様と公開手順は README.md を参照。</p>`;
 }
@@ -1837,13 +1820,18 @@ function receiptToPending(r){
       if(ex && u && amt > 0 && !(ex.amount && ex.unit)){ ex.amount = amt; ex.unit = u; }  // 内容量が空なら補完
       l.locked = true; l.editing = false; return;
     }
-    const n = norm(l.raw);
-    const exact = allProductsIn(pending).find(pr => norm(pr.name) === n);
+    const nm = (l.cleanName || l.raw);
+    /* 商品の同定は「印字(raw)」ではなく「Geminiの整えた名前」を主に使う。
+       raw はレシート印字そのままで毎回微妙に違う（例:「2000mlペ」「2000mlペット」）ため、
+       raw だけで比較すると同一商品が何度も重複登録されてしまう（実際に発生した不具合）。
+       clean name はGeminiが毎回同じ表記に整えるため、こちらを優先して既存商品と照合する。 */
+    const nzName = norm(nm), nzRaw = norm(l.raw);
+    const exact = allProductsIn(pending).find(pr => norm(pr.name) === nzName)
+               || allProductsIn(pending).find(pr => norm(pr.name) === nzRaw);
     if(exact){
       if(u && amt > 0 && !(exact.amount && exact.unit)){ exact.amount = amt; exact.unit = u; }
       l.productId = exact.id; l.locked = true; l.editing = false; return;
     }
-    const nm = (l.cleanName || l.raw);
     const np = { id: uid('P'), name: nm, category: guessCategory(nm),
       amount: (u && amt > 0) ? amt : '', unit: (u && amt > 0) ? u : '',
       genre: l.genre || guessGenre(l.raw, nm) };   /* 商品名はGeminiの整形名、ジャンル・内容量はGemini優先 */
@@ -1922,22 +1910,6 @@ async function runImport(text){
 
 function saveCache(){
   store.set('kakeibo_cache', JSON.stringify({ data: state.data, demo: state.demo, ts: state.lastSync }));
-}
-async function resetAll(){
-  if(state.demo || !state.cfg.gasUrl){ toast('GAS接続時のみ実行できます'); return; }
-  if(!confirm('スプレッドシートの全データを削除します。\n購入明細・商品・店舗・辞書・ジャンルがすべて消え、元に戻せません。\n\n本当にリセットしますか？')) return;
-  if(!confirm('最終確認です。\n\nこの操作は取り消せません。すべてのデータを削除して本当によろしいですか？')) return;
-  try{
-    busy('リセット中…');
-    await api('reset', { confirm:'RESET' });
-    state.data = { items:[], products:[], stores:[], aliases:[], genres:[] };
-    store.del('kakeibo_cache');
-    state.q = ''; state.genreEdit = null;
-    render();
-    toast('全データをリセットしました');
-  }catch(err){
-    toast('リセットに失敗: ' + err.message);
-  }finally{ busy(null); }
 }
 async function sync(showResult){
   if(!state.cfg.gasUrl){ if(showResult) toast('GASのURLが未設定です（デモモードで動作中）'); return; }
@@ -2029,9 +2001,6 @@ document.addEventListener('click', e => {
       store.set('kakeibo_cfg', JSON.stringify(state.cfg));
       toast(state.cfg.budget ? '生活費を保存しました' : '生活費を未設定にしました');
       render(); break; }
-    case 'cfg-sync': sync(true); break;
-    case 'cfg-demo': loadDemo(); render(); toast('デモデータを読み込みました'); break;
-    case 'cfg-reset': resetAll(); break;
     case 'export-analysis': exportAnalysis(); break;
   }
 });
