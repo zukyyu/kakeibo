@@ -989,6 +989,7 @@ function memoResultsHtml(){
   const found = rs.filter(r => r.price != null).sort((a,b) => a.price - b.price);
   const notFound = rs.filter(r => r.price == null);
   if(!found.length && !notFound.length) return '';
+  const total = found.reduce((a, r) => a + r.price, 0);
   let html = `<div class="card" style="margin-top:10px">`;
   found.forEach(r => {
     html += `<div class="row">
@@ -1000,6 +1001,13 @@ function memoResultsHtml(){
   if(notFound.length){
     html += `<div class="row" style="opacity:.6"><div class="grow"><div class="t1">${notFound.map(r=>esc(r.input)).join('・')}</div>
       <div class="t2">登録なし（データがまだありません）</div></div></div>`;
+  }
+  if(found.length){
+    html += `<div class="row" style="border-top:2px solid var(--line);margin-top:2px">
+      <div class="grow"><div class="t1" style="font-weight:600">合計（底値ベース・${found.length}点）</div>
+        ${notFound.length ? `<div class="t2">登録なし${notFound.length}点は含まず</div>` : ''}</div>
+      <div class="price" style="font-size:20px">${yen(total)}</div>
+    </div>`;
   }
   html += `</div>`;
   return html;
